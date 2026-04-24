@@ -27,8 +27,9 @@ def create_new_workbook():
     for q_idx, start_col in enumerate(QUESTION_COL_START):
         base_col = start_col + 1
         ws.cell(row=3, column=base_col, value=f"Q{q_idx+1}")
-        for offset in range(5):
-            ws.cell(row=4, column=base_col + offset, value=f"選項{offset+1}")
+        option_labels = ["非常滿意(1)", "滿意(2)", "尚可(3)", "不滿意(4)", "非常不滿意(5)"]
+        for offset, label in enumerate(option_labels):
+            ws.cell(row=4, column=base_col + offset, value=label)
             
     ws.cell(row=4, column=TEXT_COL_1 + 1, value="反映與建議")
     ws.cell(row=4, column=TEXT_COL_2 + 1, value="其他建議")
