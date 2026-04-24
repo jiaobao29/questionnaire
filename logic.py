@@ -4,19 +4,29 @@ import json
 import openpyxl
 import pandas as pd
 from schema import (
-    OUTPUT_PATH, PROGRESS_FILE, QUESTION_COL_START, 
-    TEXT_COL_1, TEXT_COL_2, DATA_START_ROW
+    OUTPUT_PATH, PROGRESS_FILE, get_config, DATA_START_ROW
 )
 
-def initialize_system():
+def initialize_system(q_count: int):
     """確保雲端環境下有 Excel 檔案與正確的表頭"""
     if not os.path.exists(OUTPUT_PATH):
-        create_new_workbook()
+        create_new_workbook(q_count)
         # 清除舊的進度記錄
         if os.path.exists(PROGRESS_FILE):
             os.remove(PROGRESS_FILE)
+    else:
+        # 檢查現有檔案的問題數量是否符合
+        wb = openpyxl.load_workbook(OUTPUT_PATH)
+        ws = wb.active
+        # 簡單檢查：找最後一個 Q{n} 是否正確
+        config = get_config(q_count)
+        last_q_col = config["question_starts"][-1] + 1
+        expected_header = f"Q{q_count}"
+        if ws.cell(row=3, column=last_q_col).value != expected_header:
+            return False # 表示不匹配
+    return True
 
-def create_new_workbook():
+def create_new_workbook(q_count: int):
     """動態產生一個全新的 Excel 活頁簿，並自動設定好表頭"""
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -24,15 +34,17 @@ def create_new_workbook():
     
     ws.cell(row=1, column=1, value="問卷資料收集結果")
     
-    for q_idx, start_col in enumerate(QUESTION_COL_START):
+    config = get_config(q_count)
+    
+    for q_idx, start_col in enumerate(config["question_starts"]):
         base_col = start_col + 1
         ws.cell(row=3, column=base_col, value=f"Q{q_idx+1}")
         option_labels = ["非常滿意(1)", "滿意(2)", "尚可(3)", "不滿意(4)", "非常不滿意(5)"]
         for offset, label in enumerate(option_labels):
             ws.cell(row=4, column=base_col + offset, value=label)
             
-    ws.cell(row=4, column=TEXT_COL_1 + 1, value="反映與建議")
-    ws.cell(row=4, column=TEXT_COL_2 + 1, value="其他建議")
+    ws.cell(row=4, column=config["text_col_1"] + 1, value="反映與建議")
+    ws.cell(row=4, column=config["text_col_2"] + 1, value="其他建議")
     
     wb.save(OUTPUT_PATH)
     return wb
@@ -70,29 +82,31 @@ def get_excel_download_bytes() -> bytes:
             return f.read()
     return b""
 
-def save_survey_entry(wb, current_row: int, choices: list, t1: str, t2: str):
+def save_survey_entry(wb, current_row: int, choices: list, t1: str, t2: str, q_count: int):
     """將單筆問卷資料寫入 Excel"""
     ws = wb.active
+    config = get_config(q_count)
     
     # 寫入選擇題
     for q_idx, val in enumerate(choices):
-        start_col = QUESTION_COL_START[q_idx] + 1
+        start_col = config["question_starts"][q_idx] + 1
         for offset in range(5):
             ws.cell(row=current_row, column=start_col + offset).value = (
                 1 if (offset + 1) == val else None
             )
             
     # 寫入文字題
-    ws.cell(row=current_row, column=TEXT_COL_1 + 1).value = t1 or None
-    ws.cell(row=current_row, column=TEXT_COL_2 + 1).value = t2 or None
+    ws.cell(row=current_row, column=config["text_col_1"] + 1).value = t1 or None
+    ws.cell(row=current_row, column=config["text_col_2"] + 1).value = t2 or None
     
     # 儲存 Excel 與寫入下一筆的進度
     wb.save(OUTPUT_PATH)
     save_progress(current_row + 1)
 
-def update_and_get_stats(wb, current_row: int) -> pd.DataFrame | None:
+def update_and_get_stats(wb, current_row: int, q_count: int) -> pd.DataFrame | None:
     """計算百分比、更新 Excel 分頁並回傳 Pandas DataFrame 給 UI 顯示"""
     ws_data = wb.active
+    config = get_config(q_count)
     
     if "統計結果" in wb.sheetnames:
         ws_stats = wb["統計結果"]
@@ -100,7 +114,12 @@ def update_and_get_stats(wb, current_row: int) -> pd.DataFrame | None:
         ws_stats = wb.create_sheet("統計結果")
 
     total_responses = current_row - DATA_START_ROW
-    if total_responses == 0:
+    if total_responses <= 0:
+        # 如果沒有資料，清除舊的統計分頁內容（如果有）
+        if "統計結果" in wb.sheetnames:
+            for row in ws_stats.iter_rows():
+                for cell in row:
+                    cell.value = None
         return None
 
     headers =["問題", "非常滿意(1)", "滿意(2)", "尚可(3)", "不滿意(4)", "非常不滿意(5)"]
@@ -109,7 +128,7 @@ def update_and_get_stats(wb, current_row: int) -> pd.DataFrame | None:
 
     stats_data =[]
 
-    for q_idx, start_col_idx in enumerate(QUESTION_COL_START):
+    for q_idx, start_col_idx in enumerate(config["question_starts"]):
         q_label = f"Q{q_idx+1}"
         row_stats = [q_label]
         
