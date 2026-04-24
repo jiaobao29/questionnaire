@@ -7,6 +7,24 @@ st.set_page_config(page_title="問卷快速輸入系統", page_icon="🚀", layo
 
 def main():
     st.title("🚀 問卷快速輸入系統")
+
+    # 1. Session State 初始化 (確保基礎變數就緒)
+    if 'q_count' not in st.session_state:
+        st.session_state.q_count = 4
+    if 'current_row' not in st.session_state:
+        st.session_state.current_row = logic.load_progress()
+    if 'session_count' not in st.session_state:
+        st.session_state.session_count = 0
+
+    # 2. 預先載入 Excel 並計算統計 (關鍵修復：在渲染下載按鈕前，先更新 Excel 內的統計分頁)
+    is_ok = logic.initialize_system(st.session_state.q_count)
+    if is_ok:
+        wb = logic.get_workbook()
+        # 這一步會計算最新統計並呼叫 wb.save()，確保磁碟上的檔案是最新的
+        stats_df = logic.update_and_get_stats(wb, st.session_state.current_row, st.session_state.q_count)
+    else:
+        wb = None
+        stats_df = None
     
     # ── SIDEBAR: 設定、下載與重置 ──
     with st.sidebar:
@@ -15,13 +33,13 @@ def main():
             "選擇題數量 (N)", 
             min_value=1, 
             max_value=50, 
-            value=st.session_state.get('q_count', 4),
+            value=st.session_state.q_count,
             step=1,
             help="動態調整問卷的選擇題數量"
         )
         
         # 如果 q_count 改變，我們需要通知使用者重置或自動處理
-        if 'q_count' in st.session_state and st.session_state.q_count != q_count:
+        if st.session_state.q_count != q_count:
             st.warning("⚠️ 檢測到問題數量變動！")
             if st.button("🔄 套用變動並重置 Excel 格式"):
                 logic.reset_data()
@@ -29,14 +47,10 @@ def main():
                 st.session_state.current_row = DATA_START_ROW
                 st.session_state.session_count = 0
                 st.rerun()
-        else:
-            st.session_state.q_count = q_count
 
         st.divider()
         st.header("📥 資料下載與管理")
         
-        # 初始化系統 (使用當前的 q_count)
-        is_ok = logic.initialize_system(st.session_state.q_count)
         if not is_ok:
             st.error(f"❌ 現有的 Excel 格式與問題數量 ({st.session_state.q_count}) 不符！")
             if st.button("🗑️ 重置 Excel 以符合新格式"):
@@ -44,7 +58,7 @@ def main():
                 st.rerun()
             return # 停止渲染其餘部分
 
-        # 此時讀取的檔案二進位資料
+        # 此時讀取的檔案二進位資料 (因為上面已經先執行過 update_and_get_stats，檔案已更新)
         excel_bytes = logic.get_excel_download_bytes()
         if excel_bytes:
             st.download_button(
@@ -62,18 +76,6 @@ def main():
             st.session_state.current_row = DATA_START_ROW
             st.session_state.session_count = 0
             st.rerun()
-
-    # 1. Session State 初始化 (確保 current_row 就緒)
-    if 'current_row' not in st.session_state:
-        st.session_state.current_row = logic.load_progress()
-    if 'session_count' not in st.session_state:
-        st.session_state.session_count = 0
-
-    # 2. 載入 Excel
-    wb = logic.get_workbook()
-
-    # 3. 計算統計 (傳入動態 q_count)
-    stats_df = logic.update_and_get_stats(wb, st.session_state.current_row, st.session_state.q_count)
 
     # 目前是第幾份
     seq = st.session_state.current_row - DATA_START_ROW + 1
